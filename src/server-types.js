@@ -63,11 +63,33 @@ var colors;
     colors.BgCyan = "\x1b[46m";
     colors.BgWhite = "\x1b[47m";
 })(colors = exports.colors || (exports.colors = {}));
+const DEBUGLEVEL = -1;
 function DebugLogger(prefix) {
-    return function (str, ...args) {
+    //if(prefix.startsWith("V:")) return function(){};
+    return function (...args) {
+        //this sets the default log level for the message
+        var msgLevel = 0;
+        if (typeof args[0] === "number") {
+            if (DEBUGLEVEL > args[0])
+                return;
+            else
+                msgLevel = args.shift();
+        }
+        else {
+            if (DEBUGLEVEL > msgLevel)
+                return;
+        }
         let t = new Date();
         let date = util_1.format('%s-%s-%s %s:%s:%s', t.getFullYear(), padLeft(t.getMonth() + 1, '00'), padLeft(t.getDate(), '00'), padLeft(t.getHours(), '00'), padLeft(t.getMinutes(), '00'), padLeft(t.getSeconds(), '00'));
-        console.log([colors.FgGreen + prefix, date + colors.Reset, util_1.format.apply(null, arguments)].join(' '));
+        console.log([' ', (msgLevel >= 3 ? (colors.BgRed + colors.FgWhite) : colors.FgRed) + prefix,
+            colors.FgCyan, date, colors.Reset, util_1.format.apply(null, args)].join(' ').split('\n').map((e, i) => {
+            if (i > 0) {
+                return new Array(28 + prefix.length).join(' ') + e;
+            }
+            else {
+                return e;
+            }
+        }).join('\n'));
     };
 }
 exports.DebugLogger = DebugLogger;
@@ -98,9 +120,9 @@ exports.handleProgrammersException = handleProgrammersException;
 exports.serveStatic = (function () {
     const staticServer = require('../lib/node-static');
     const serve = new staticServer.Server({
-        mount: '/',
+        mount: '/'
         // gzipTransfer: true, 
-        gzip: /^(text\/html|application\/javascript|text\/css|application\/json)$/gi
+        // gzip:/^(text\/html|application\/javascript|text\/css|application\/json)$/gi 
     });
     const promise = new events_1.EventEmitter();
     return function (path, state, stat) {

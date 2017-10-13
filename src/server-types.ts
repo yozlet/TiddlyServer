@@ -86,13 +86,46 @@ export namespace colors {
     export const BgCyan = "\x1b[46m"
     export const BgWhite = "\x1b[47m"
 }
-export function DebugLogger(prefix: string) {
-    return function (str: string, ...args: any[]) {
+
+const DEBUGLEVEL = -1;
+/**
+ *  4 - Errors that require the process to exit for restart
+ *  3 - Major errors that are handled and do not require a server restart
+ *  2 - Warnings or errors that do not alter the program flow but need to be marked
+ *  1 - Info - Most startup messages
+ *  0 - Normal debug messages and all software and request-side error messages
+ * -1 - Detailed debug messages from high level apis
+ * -2 - Response status messages and error response data
+ * -3 - Request and response data for all messages (verbose)
+ * -4 - Protocol details and full data dump (such as encryption steps and keys)
+ */
+declare function DebugLog(level: number, str: string, ...args: any[]);
+declare function DebugLog(str: string, ...args: any[]);
+
+export function DebugLogger(prefix: string): typeof DebugLog {
+    //if(prefix.startsWith("V:")) return function(){};
+    return function (...args: any[]) {
+        //this sets the default log level for the message
+        var msgLevel = 0;
+        if (typeof args[0] === "number") {
+            if (DEBUGLEVEL > args[0]) return;
+            else msgLevel = args.shift();
+        } else {
+            if (DEBUGLEVEL > msgLevel) return;
+        }
         let t = new Date();
         let date = format('%s-%s-%s %s:%s:%s', t.getFullYear(), padLeft(t.getMonth() + 1, '00'), padLeft(t.getDate(), '00'),
             padLeft(t.getHours(), '00'), padLeft(t.getMinutes(), '00'), padLeft(t.getSeconds(), '00'));
-        console.log([colors.FgGreen + prefix, date + colors.Reset, format.apply(null, arguments)].join(' '));
-    };
+        console.log([' ', (msgLevel >= 3 ? (colors.BgRed + colors.FgWhite) : colors.FgRed) + prefix,
+            colors.FgCyan, date, colors.Reset, format.apply(null, args)].join(' ').split('\n').map((e, i) => {
+                if (i > 0) {
+                    return new Array(28 + prefix.length).join(' ') + e;
+                } else {
+                    return e;
+                }
+            }).join('\n'));
+
+    } as typeof DebugLog;
 }
 export function ErrorLogger(prefix: string) {
     return function (str: string, ...args: any[]) {

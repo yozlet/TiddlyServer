@@ -16,5 +16,9 @@
         //"rxjs",
         "new-server",
         "archive"
+    ],
+    "files": [
+        "src/server.ts", 
+        "src/test.ts"
     ]
 }

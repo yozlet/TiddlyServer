@@ -339,19 +339,18 @@ function file(obs) {
                     subscriber.complete();
                 }
             }).switchMap(() => {
-                let stream = fs.createWriteStream(fullpath);
-                if (state.req.headers["content-encoding"]) {
-                    const encoding = state.req.headers["content-encoding"].split(', ');
-                    encoding.forEach(e => {
-                        if (e.trim() === "gzip") {
-                            stream = stream.pipe(zlib.createGzip());
-                        }
-                        else {
-                            state.throw(415, "Only gzip is supported by this server");
-                        }
-                    });
-                }
-                const write = state.req.pipe(stream);
+                let stream = state.req;
+                // if (state.req.headers["content-encoding"]) {
+                //     const encoding: (string)[] = state.req.headers["content-encoding"].split(', ');
+                //     encoding.forEach(e => {
+                //         if (e.trim() === "gzip") {
+                //             stream = stream.pipe(zlib.createGunzip());
+                //         } else {
+                //             state.throw(415, "Only gzip is supported by this server");
+                //         }
+                //     })
+                // }
+                const write = stream.pipe(fs.createWriteStream(fullpath));
                 const finish = rx_1.Observable.fromEvent(write, 'finish').take(1);
                 return rx_1.Observable.merge(finish, rx_1.Observable.fromEvent(write, 'error').takeUntil(finish)).switchMap((err) => {
                     if (err) {
@@ -385,3 +384,51 @@ function file(obs) {
         }
     });
 }
+class PathResolver {
+    constructor(tree) {
+        this.tree = tree;
+    }
+    resolve(state) {
+        var reqpath = decodeURI(state.path.slice().filter(a => a).join('/')).split('/').filter(a => a);
+        var result = this.getTreePath(reqpath);
+        //if the reqpath is longer than end, but item is not a string, then the complete 
+        //path is not in the tree and we send a 404.
+        if (reqpath.length > result.end && !result.more) {
+            return state.throw(404);
+        }
+        //get the remainder of the path
+        let filepath = reqpath.slice(result.end).map(a => a.trim());
+        //check for invalid items (such as ..)
+        if (!filepath.every(a => a !== ".." && a !== "."))
+            return state.throw(404);
+        const fullfilepath = (result.more) ? path.join(result.item, ...filepath) : '';
+        return { item: result.item, reqpath, treepath: reqpath.slice(0, result.end), filepath, fullfilepath, state };
+    }
+    /**
+     *
+     * @param {string[]} reqpath
+     * @returns a tuple of (0) the folder path, (1) the index
+     * at which to slice to get the path below [0], and (2) true
+     * if the loop found a string before iterating through all
+     * of the request path. If the last item in reqpath resolves
+     * to a string it will return false.
+     */
+    getTreePath(reqpath) {
+        var item = this.tree;
+        var more = false;
+        for (var end = 0; end < reqpath.length; end++) {
+            if (typeof item !== 'string' && typeof item[reqpath[end]] !== 'undefined') {
+                item = item[reqpath[end]];
+            }
+            else if (typeof item === "string") {
+                more = true;
+                break;
+            }
+            else {
+                break;
+            }
+        }
+        return { item, end, more };
+    }
+}
+exports.PathResolver = PathResolver;
