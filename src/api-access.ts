@@ -130,6 +130,7 @@ function examineAccessPath(
 ) {
     let loop = new Subject();
     let skip = new Subject();
+
     return input.map(([root, item, tag]: [any, string | string[], any]) => {
         return [root, Array.isArray(item) ? item : item.split('/'), tag];
     }).mergeMap(([root, item, tag]) => {
@@ -409,10 +410,66 @@ function file(obs: Observable<AccessPathResult<AccessPathTag>>) {
     }) as Observable<StateObject>;
 }
 
+interface PathResolverResult {
+    //the tree string returned from the path resolver
+    item: string;
+    // client request url path
+    reqpath: string[];
+    // tree part of request url
+    treepath: string[];
+    // file part of request url
+    filepath: string[];
+    // absolute file system referred to by file system
+    fullfilepath: string;
+    state: StateObject;
+}
+
+type StatPathResult = { stat: fs.Stats, statpath: string, infostat?: fs.Stats, index: number, itemtype: string };
+function statPath(test: PathResolverResult) {
+    let endStat = false;
+    return Observable.from([test.item].concat(test.filepath)).scan((n, e) => {
+        return { path: path.join(n.path, e), index: n.index + 1 };
+    }, { path: "", index: -1 }).concatMap(statpath => {
+        if (endStat) return Observable.empty<never>();
+        else return new Promise(resolve => {
+            fs.stat(statpath.path, (err, stat) => {
+                if (err) endStat = true;
+                else if (stat.isDirectory())
+                    fs.stat(path.join(statpath.path, "tiddlywiki.info"), (err2, infostat) => {
+                        if (!err2 && (infostat.isFile() || infostat.isSymbolicLink())) {
+                            endStat = true;
+                            resolve({ stat, statpath, infostat, index: statpath.index })
+                        } else resolve({ stat, statpath, index: statpath.index });
+                    })
+                else resolve({ stat, statpath, index: statpath.index });
+            })
+        })
+    }).reduce<any, StatPathResult>((n, e) => e, {} as any).map(result => {
+        //endstat is true if the full path is not found, or the tiddlywiki.info is found
+        const { stat, statpath, infostat, index } = result;
+        let itemtype;
+
+        if (stat.isDirectory()) itemtype = !!infostat ? "datafolder" : "folder";
+        else if (stat.isFile() || stat.isSymbolicLink()) itemtype = "file"
+        else itemtype = "error"
+
+        if (endStat && itemtype === "file") {
+            //do I allow this currently?
+        } else if (endStat && itemtype === "folder") {
+            //just return a 404, we didn't find a file.
+        } else if (itemtype === "datafolder") {
+            //hand off to the data folder handler
+        }
+
+        result.itemtype = itemtype;
+        return result as typeof result;
+    })
+}
+
 type TreeObject = { [K: string]: string | TreeObject };
 type TreePathResult = { item: TreeObject, end: number, more: false }
-| { item: string, end: number, more: false } 
-| { item: string, end: number, more: true };
+    | { item: string, end: number, more: false }
+    | { item: string, end: number, more: true };
 export class PathResolver {
     constructor(
         public tree: TreeObject
@@ -425,15 +482,12 @@ export class PathResolver {
         var result = this.getTreePath(reqpath);
         //if the reqpath is longer than end, but item is not a string, then the complete 
         //path is not in the tree and we send a 404.
-        if (reqpath.length > result.end && !result.more) {
-            return state.throw(404) as any;
-        }
-
+        if (reqpath.length > result.end && !result.more)
+            return state.throw(404) as never;
         //get the remainder of the path
         let filepath = reqpath.slice(result.end).map(a => a.trim());
         //check for invalid items (such as ..)
-        if (!filepath.every(a => a !== ".." && a !== "."))
-            return state.throw(404);
+        if (!filepath.every(a => a !== ".." && a !== ".")) return state.throw(404);
         const fullfilepath = (result.more) ? path.join(result.item, ...filepath) : '';
         return { item: result.item, reqpath, treepath: reqpath.slice(0, result.end), filepath, fullfilepath, state };
     }
@@ -453,11 +507,8 @@ export class PathResolver {
             if (typeof item !== 'string' && typeof item[reqpath[end]] !== 'undefined') {
                 item = item[reqpath[end]];
             } else if (typeof item === "string") {
-                more = true;
-                break;
-            } else {
-                break;
-            }
+                more = true; break;
+            } else break;
         }
         return { item, end, more } as any;
     }
