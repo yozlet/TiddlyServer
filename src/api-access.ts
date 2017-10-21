@@ -441,8 +441,8 @@ class Chain<T> implements Subscribable<T> {
         return new Chain(this.source.map(chain).filter(obsTruthy).filter(Chain.isObservable).concatAll());
     }
     subscribe(
-        observerOrNext?: NextObserver<T> | ErrorObserver<T> | CompletionObserver<T> | ((value: T) => void) | undefined, 
-        error?: ((error: any) => void) | undefined, 
+        observerOrNext?: NextObserver<T> | ErrorObserver<T> | CompletionObserver<T> | ((value: T) => void) | undefined,
+        error?: ((error: any) => void) | undefined,
         complete?: (() => void) | undefined
     ): AnonymousSubscription {
         return this.source.subscribe(observerOrNext as any, error, complete);
@@ -463,10 +463,12 @@ function statPath(test: PathResolverResult) {
         else return new Promise(resolve => {
             // What I wish I could write
             new Chain(obs_stat(fs.stat)(statpath.path)).xx(([err, stat]) => {
-                if (err) endStat = true;
+                if (err)
+                    endStat = true;
                 else if (stat.isDirectory())
                     return obs_stat(stat)(path.join(statpath.path, "tiddlywiki.info"));
-                else resolve({ stat, statpath, index: statpath.index })
+                else
+                    resolve({ stat, statpath, index: statpath.index })
             }).xx(([err2, infostat, stat]) => {
                 if (!err2 && (infostat.isFile() || infostat.isSymbolicLink())) {
                     endStat = true;
