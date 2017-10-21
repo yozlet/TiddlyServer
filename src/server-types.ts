@@ -162,7 +162,7 @@ export const serveStatic: (path: string, state: StateObject, stat: fs.Stats) => 
         finish(...args: any[]): any;
     }
     const staticServer = require('../lib/node-static');
-    const serve = new staticServer.Server({ 
+    const serve = new staticServer.Server({
         mount: '/'
         // gzipTransfer: true, 
         // gzip:/^(text\/html|application\/javascript|text\/css|application\/json)$/gi 
@@ -190,17 +190,22 @@ export const serveStatic: (path: string, state: StateObject, stat: fs.Stats) => 
 
 type NodeCallback<T, S> = [NodeJS.ErrnoException, T, S];
 
-export const obs_stat = <T>(state: T) => Observable.bindCallback(
-    fs.stat, (err, stat): NodeCallback<fs.Stats, T> => [err, stat, state]);
 
-export const obs_readdir = <T>(state: T) => Observable.bindCallback(
-    fs.readdir, (err, files): NodeCallback<string[], T> => [err, files, state]);
+// export function obs<S>(state?: S) {
+//     return Observable.bindCallback(fs.stat, (err, stat): NodeCallback<fs.Stats, S> => [err, stat, state] as any);
+// }
 
-export const obs_readFile = <T>(state: T) => Observable.bindCallback(
-    fs.readFile, (err, data): NodeCallback<string | Buffer, T> => [err, data, state]);
+export const obs_stat = <T>(state?: T) => Observable.bindCallback(
+    fs.stat, (err, stat): NodeCallback<fs.Stats, T> => [err, stat, state] as any);
 
-export const obs_writeFile = <T>(state: T) => Observable.bindCallback(
-    fs.writeFile, (err, data): NodeCallback<string | Buffer, T> => [err, data, state]);
+export const obs_readdir = <T>(state?: T) => Observable.bindCallback(
+    fs.readdir, (err, files): NodeCallback<string[], T> => [err, files, state] as any);
+
+export const obs_readFile = <T>(state?: T) => Observable.bindCallback(
+    fs.readFile, (err, data): NodeCallback<string | Buffer, T> => [err, data, state] as any);
+
+export const obs_writeFile = <T>(state?: T) => Observable.bindCallback(
+    fs.writeFile, (err, data): NodeCallback<string | Buffer, T> => [err, data, state] as any);
 
 
 export class StateError extends Error {
@@ -373,7 +378,7 @@ export function createHashmapNumber<T>(keys: number[], values: T[]): { [id: numb
     return obj;
 }
 
-export function obsTruthy<T>(a: T | undefined | null | false | "" | 0): a is T {
+export function obsTruthy<T>(a: T | undefined | null | false | "" | 0 | void): a is T {
     return !!a;
 }
 

@@ -1,7 +1,7 @@
 import { Observable, Subject, Scheduler, Operator, Subscriber, Subscription } from "../lib/rx";
 import {
     StateObject, keys, ServerConfig, AccessPathResult, AccessPathTag, DirectoryEntry,
-    Directory, sortBySelector, serveStatic, obs_stat, obs_readdir, FolderEntryType, ErrorLogger
+    Directory, sortBySelector, serveStatic, obs_stat, obs_readdir, FolderEntryType, ErrorLogger, obsTruthy
 } from "./server-types";
 
 import * as fs from 'fs';
@@ -18,6 +18,9 @@ import { EventEmitter } from "events";
 import { datafolder, init as initTiddlyWiki } from "./datafolder";
 import { format } from "util";
 import { Stream, Writable } from "stream";
+import { Subscribable } from "rxjs/Observable";
+import { NextObserver, ErrorObserver, CompletionObserver } from "rxjs/Observer";
+import { AnonymousSubscription } from "rxjs/Subscription";
 
 const mime: Mime = require('../lib/mime');
 
@@ -423,6 +426,32 @@ interface PathResolverResult {
     fullfilepath: string;
     state: StateObject;
 }
+type ChainFunction<T, R> = (item: T) => (Observable<R> | void);
+
+/**
+ * The handler is chained to the source, and if the handler returns an observable
+ * the chain will continue, otherwise the chain completes.
+ */
+class Chain<T> implements Subscribable<T> {
+    static isObservable<T>(obj: any): obj is Observable<T> {
+        return typeof obj === "object" && obj instanceof Observable;
+    }
+    constructor(private source: Observable<T>) { }
+    xx<R>(chain: ChainFunction<T, R>) {
+        return new Chain(this.source.map(chain).filter(obsTruthy).filter(Chain.isObservable).concatAll());
+    }
+    subscribe(
+        observerOrNext?: NextObserver<T> | ErrorObserver<T> | CompletionObserver<T> | ((value: T) => void) | undefined, 
+        error?: ((error: any) => void) | undefined, 
+        complete?: (() => void) | undefined
+    ): AnonymousSubscription {
+        return this.source.subscribe(observerOrNext as any, error, complete);
+    }
+}
+// function xx<T, R>(this: T, chain: ChainFunction<T, R>): { xx };
+// function xx<T, R>(this: T, chain: Observable<R>): Chain<T> {
+//     return new Chain();
+// }
 
 type StatPathResult = { stat: fs.Stats, statpath: string, infostat?: fs.Stats, index: number, itemtype: string };
 function statPath(test: PathResolverResult) {
@@ -432,6 +461,35 @@ function statPath(test: PathResolverResult) {
     }, { path: "", index: -1 }).concatMap(statpath => {
         if (endStat) return Observable.empty<never>();
         else return new Promise(resolve => {
+            // What I wish I could write
+            new Chain(obs_stat(fs.stat)(statpath.path)).xx(([err, stat]) => {
+                if (err) endStat = true;
+                else if (stat.isDirectory())
+                    return obs_stat(stat)(path.join(statpath.path, "tiddlywiki.info"));
+                else resolve({ stat, statpath, index: statpath.index })
+            }).xx(([err2, infostat, stat]) => {
+                if (!err2 && (infostat.isFile() || infostat.isSymbolicLink())) {
+                    endStat = true;
+                    resolve({ stat, statpath, infostat, index: statpath.index })
+                } else resolve({ stat, statpath, index: statpath.index });
+            });
+            // chain_observable([
+            //     obs_stat()(statpath.path),
+            //     ([err, stat]) => {
+            //         if (err) endStat = true;
+            //         else if (stat.isDirectory())
+            //             return obs_stat(stat)(path.join(statpath.path, "tiddlywiki.info"));
+            //         else resolve({ stat, statpath, index: statpath.index })
+            //     },
+            //     ([err2, infostat, stat]) => {
+            //         if (!err2 && (infostat.isFile() || infostat.isSymbolicLink())) {
+            //             endStat = true;
+            //             resolve({ stat, statpath, infostat, index: statpath.index })
+            //         } else resolve({ stat, statpath, index: statpath.index });
+            //     }
+            // ])
+
+            // What I actually have to write (in theory)
             fs.stat(statpath.path, (err, stat) => {
                 if (err) endStat = true;
                 else if (stat.isDirectory())
