@@ -3,7 +3,7 @@ import {
 } from '../lib/rx';
 
 import {
-    StateObject, DebugLogger, ErrorLogger, sanitizeJSON, keys, ServerConfig, serveStatic,
+    StateObject, DebugLogger, sanitizeJSON, keys, ServerConfig, serveStatic,
     obs_stat, colors, obsTruthy
 } from "./server-types";
 
@@ -36,7 +36,7 @@ console.debug = function () { }; //noop console debug;
 //setup global objects
 const eventer = new EventEmitter();
 const debug = DebugLogger('APP');
-const error = ErrorLogger('APP');
+// const error = ErrorLogger('APP');
 const logger = require('../lib/morgan.js').handler;
 
 const settingsFile = path.normalize(process.argv[2]
@@ -271,8 +271,7 @@ function serverListenCB(err: any, res: any) {
 serverLocalHost.listen(settings.port, "127.0.0.1", (err, res) => {
     if (settings.host !== "127.0.0.1")
         serverNetwork.listen(settings.port, settings.host, serverListenCB);
-    else
-        serverListenCB(err, res);
+    else serverListenCB(err, res);
 });
 
 

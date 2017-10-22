@@ -93,14 +93,6 @@ function DebugLogger(prefix) {
     };
 }
 exports.DebugLogger = DebugLogger;
-function ErrorLogger(prefix) {
-    return function (str, ...args) {
-        let t = new Date();
-        let date = util_1.format('%s-%s-%s %s:%s:%s', t.getFullYear(), padLeft(t.getMonth() + 1, '00'), padLeft(t.getDate(), '00'), padLeft(t.getHours(), '00'), padLeft(t.getMinutes(), '00'), padLeft(t.getSeconds(), '00'));
-        console.error([colors.FgRed + prefix, colors.FgYellow + date + colors.Reset, util_1.format.apply(null, arguments)].join(' '));
-    };
-}
-exports.ErrorLogger = ErrorLogger;
 function sanitizeJSON(key, value) {
     // returning undefined omits the key from being serialized
     if (!key) {
@@ -109,14 +101,11 @@ function sanitizeJSON(key, value) {
     else if (key.substring(0, 1) === "$")
         return; //Remove angular tags
     else if (key.substring(0, 1) === "_")
-        return; //Remove NoSQL tags, including _id
+        return; //Remove NoSQL tags
     else
         return value;
 }
 exports.sanitizeJSON = sanitizeJSON;
-function handleProgrammersException(logger, err, message) {
-}
-exports.handleProgrammersException = handleProgrammersException;
 exports.serveStatic = (function () {
     const staticServer = require('../lib/node-static');
     const serve = new staticServer.Server({
@@ -144,6 +133,9 @@ exports.serveStatic = (function () {
         });
     };
 })();
+// export function obs<S>(state?: S) {
+//     return Observable.bindCallback(fs.stat, (err, stat): NodeCallback<fs.Stats, S> => [err, stat, state] as any);
+// }
 exports.obs_stat = (state) => rx_1.Observable.bindCallback(fs.stat, (err, stat) => [err, stat, state]);
 exports.obs_readdir = (state) => rx_1.Observable.bindCallback(fs.readdir, (err, files) => [err, files, state]);
 exports.obs_readFile = (state) => rx_1.Observable.bindCallback(fs.readFile, (err, data) => [err, data, state]);

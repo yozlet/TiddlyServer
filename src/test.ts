@@ -15,8 +15,8 @@ function inspectresult(result, expected) {
 	return format("%s : %s should be %s", ins === expected, ins, expected);
 }
 
-console.log(inspectresult(pr.getTreePath(["tiddlywiki"]), "[ 'object', 0, false ]"));
-console.log(inspectresult(pr.getTreePath(["projects", "nonexist"]), "[ 'object', 1, false ]"));
-console.log(inspectresult(pr.getTreePath(["projects"]), "[ 'object', 1, false ]"));
-console.log(inspectresult(pr.getTreePath(["projects", "tiddlywiki"]), "[ 'string', 2, false ]"));
-console.log(inspectresult(pr.getTreePath(["projects", "tiddlywiki", "editions"]), "[ 'string', 2, true ]"));
+// console.log(inspectresult(pr.getTreePath(["tiddlywiki"]), "[ 'object', 0, false ]"));
+// console.log(inspectresult(pr.getTreePath(["projects", "nonexist"]), "[ 'object', 1, false ]"));
+// console.log(inspectresult(pr.getTreePath(["projects"]), "[ 'object', 1, false ]"));
+// console.log(inspectresult(pr.getTreePath(["projects", "tiddlywiki"]), "[ 'string', 2, false ]"));
+// console.log(inspectresult(pr.getTreePath(["projects", "tiddlywiki", "editions"]), "[ 'string', 2, true ]"));

@@ -5,7 +5,6 @@ const rx_1 = require("../lib/rx");
 const path = require("path");
 var settings = {};
 const debug = server_types_1.DebugLogger('DAT');
-const error = server_types_1.ErrorLogger('DAT');
 function init(eventer) {
     eventer.on('settings', function (set) {
         settings = set;
@@ -108,7 +107,7 @@ function loadTiddlyWiki(prefix, folder) {
 }
 ;
 function doError(prefix, folder, err) {
-    error('error starting %s at %s: %s', prefix, folder, err.stack);
+    debug(3, 'error starting %s at %s: %s', prefix, folder, err.stack);
     const requests = loadedFolders[prefix];
     loadedFolders[prefix] = {
         handler: function (req, res) {

@@ -23,7 +23,7 @@ console.debug = function () { }; //noop console debug;
 //setup global objects
 const eventer = new events_1.EventEmitter();
 const debug = server_types_1.DebugLogger('APP');
-const error = server_types_1.ErrorLogger('APP');
+// const error = ErrorLogger('APP');
 const logger = require('../lib/morgan.js').handler;
 const settingsFile = path.normalize(process.argv[2]
     ? path.resolve(process.argv[2])

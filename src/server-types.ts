@@ -127,24 +127,13 @@ export function DebugLogger(prefix: string): typeof DebugLog {
 
     } as typeof DebugLog;
 }
-export function ErrorLogger(prefix: string) {
-    return function (str: string, ...args: any[]) {
-        let t = new Date();
-        let date = format('%s-%s-%s %s:%s:%s', t.getFullYear(), padLeft(t.getMonth() + 1, '00'), padLeft(t.getDate(), '00'),
-            padLeft(t.getHours(), '00'), padLeft(t.getMinutes(), '00'), padLeft(t.getSeconds(), '00'));
-        console.error([colors.FgRed + prefix, colors.FgYellow + date + colors.Reset, format.apply(null, arguments)].join(' '));
-    };
-}
+
 export function sanitizeJSON(key: string, value: any) {
     // returning undefined omits the key from being serialized
     if (!key) { return value; } //This is the entire value to be serialized
     else if (key.substring(0, 1) === "$") return; //Remove angular tags
-    else if (key.substring(0, 1) === "_") return; //Remove NoSQL tags, including _id
+    else if (key.substring(0, 1) === "_") return; //Remove NoSQL tags
     else return value;
-}
-
-export function handleProgrammersException(logger: any, err: any, message: any) {
-
 }
 
 export interface ServeStaticResult {
@@ -215,10 +204,18 @@ export class StateError extends Error {
         this.state = state;
     }
 }
+export type StatPathResult = { itemtype: "category", endStat: false } | {
+    stat: fs.Stats,
+    statpath: string,
+    infostat?: fs.Stats,
+    index: number,
+    itemtype: string,
+    endStat: Boolean
+}
 
 export type LoggerFunc = (str: string, ...args: any[]) => void;
 
-export class StateObject implements ThrowFunc<StateObject>{
+export class StateObject {
 
     static errorRoute(status: number, reason?: string) {
         return (obs: Observable<any>): any => {
@@ -235,6 +232,8 @@ export class StateObject implements ThrowFunc<StateObject>{
 
     body: string;
     json: any | undefined;
+
+    statPath: StatPathResult;
 
     url: {
         href: string;

@@ -1,4 +1,4 @@
-import { StateObject, keys, ServerConfig, AccessPathResult, AccessPathTag, DebugLogger, ErrorLogger } from "./server-types";
+import { StateObject, keys, ServerConfig, AccessPathResult, AccessPathTag, DebugLogger } from "./server-types";
 import { Observable } from "../lib/rx";
 
 import * as path from 'path';
@@ -9,7 +9,6 @@ import { EventEmitter } from "events";
 var settings: ServerConfig = {} as any;
 
 const debug = DebugLogger('DAT');
-const error = ErrorLogger('DAT');
 
 export function init(eventer: EventEmitter) {
     eventer.on('settings', function (set: ServerConfig) {
@@ -128,7 +127,7 @@ function loadTiddlyWiki(prefix: string, folder: string) {
 };
 
 function doError(prefix, folder, err) {
-    error('error starting %s at %s: %s', prefix, folder, err.stack);
+    debug(3, 'error starting %s at %s: %s', prefix, folder, err.stack);
     const requests = loadedFolders[prefix] as any[];
     loadedFolders[prefix] = {
         handler: function (req: http.IncomingMessage, res: http.ServerResponse) {

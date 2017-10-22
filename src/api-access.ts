@@ -1,7 +1,7 @@
 import { Observable, Subject, Scheduler, Operator, Subscriber, Subscription } from "../lib/rx";
 import {
     StateObject, keys, ServerConfig, AccessPathResult, AccessPathTag, DirectoryEntry,
-    Directory, sortBySelector, serveStatic, obs_stat, obs_readdir, FolderEntryType, ErrorLogger, obsTruthy
+    Directory, sortBySelector, serveStatic, obs_stat, obs_readdir, FolderEntryType, obsTruthy, StatPathResult, DebugLogger
 } from "./server-types";
 
 import * as fs from 'fs';
@@ -24,7 +24,7 @@ import { AnonymousSubscription } from "rxjs/Subscription";
 
 const mime: Mime = require('../lib/mime');
 
-const error = ErrorLogger("SER-API");
+const debug = DebugLogger("SER-API");
 __dirname = path.dirname(module.filename || process.execPath);
 
 export function parsePath(path: string, jsonFile: string) {
@@ -81,42 +81,26 @@ function getTreeItem(reqpath: string[]) {
 //entirely. I don't need to differentiate between two since each item lists its children.
 
 export function doAPIAccessRoute(obs: Observable<StateObject>) {
+    const resolvePath = new PathResolver(settings.tree);
     return obs.mergeMap((state: StateObject) => {
-        var reqpath = decodeURI(state.path.slice().filter(a => a).join('/')).split('/').filter(a => a);
-        var [item, end] = getTreeItem(reqpath);
-
-        //if the reqpath is longer than end, but item is not a string, then the complete 
-        //path is not in the tree and we send a 404.
-        if (reqpath.length > end && typeof item !== 'string') {
-            return state.throw(404) as any;
+        var result = resolvePath.resolve(state);
+        if (!result) return state.throw<never>(404);
+        return statPath(result).map(stat => {
+            state.statPath = stat;
+            return state;
+        });
+    }).mergeMap((state): any => {
+        if (state.statPath.itemtype === "file") {
+            //here we call the file handler
+        } else if (state.statPath.itemtype === "folder" || state.statPath.itemtype === "category") {
+            //here we do a directory listing
+        } else if (state.statPath.itemtype === "datafolder") {
+            //here we load the data folder
+        } else if (state.statPath.itemtype === "error") {
+            return state.throw(404);
+        } else {
+            return state.throw(500);
         }
-
-        //get the remainder of the path
-        let filepath = reqpath.slice(end).map(a => a.trim());
-        //check for invalid items (such as ..)
-        if (!filepath.every(a => a !== ".." && a !== "."))
-            return state.throw(403);
-        //if reqpath is longer than the tree list...we need to list files
-        return Observable.of([typeof item === 'string' ? item : '', filepath, {
-            treepath: reqpath.slice(0, end).join('/'),
-            filepath: filepath.join('/'), item, state
-        }]);
-    }).lift({
-        call: examineAccessPath
-    }).routeCase<AccessPathResult<AccessPathTag>, StateObject>((res) => {
-        //the item is an object (a category) and examineAccessPath was skipped entirely
-        if (!res.type) return 'folder';
-        //a level in the path turned out to be a datafolder or file, or could not be found
-        else if (!res.isFullpath)
-            //this is either a datafolder or a file
-            if (typeof res.type === 'string') return res.type as 'datafolder' | 'file';
-            //A folder in the path was not found. res.type is a Node stat error object
-            else return '';
-        else return res.type as 'datafolder' | 'file' | 'folder';
-    }, { folder, datafolder, file }, function error404(obs) {
-        return obs.mergeMap((res) => {
-            return res.tag.state.throw(404);
-        })
     })
 }
 
@@ -251,50 +235,46 @@ function folder(obs: Observable<AccessPathResult<AccessPathTag>>) {
     })
 }
 
-function statEntries([entries, res]: any): any {
-    type Type1 = [DirectoryEntry, string | false];
-    type Type2 = [any, fs.Stats, [DirectoryEntry, string | false]];
-    return Observable.from(entries).mergeMap<Type1, Type2>(([entry, itemPath]) => {
-        if (itemPath === false) return Observable.of([true, null, [entry, itemPath]]);
-        else return obs_stat([entry, itemPath])(itemPath);
-    }).map(res2 => {
-        let [err, stat, [entry, itemPath]] = res2;
+function getHumanSize(size: number) {
+    const TAGS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+    let power = 0;
+    while (size >= 1024) {
+        size /= 1024;
+        power++;
+    }
+    return size.toFixed(1) + TAGS[power];
+}
 
-        //set the size to a blank string by default
-        entry.size = "";
-        if (err === true) {
-            //category
+function statEntries([entries, res]: [[DirectoryEntry, string | false][], any]): any {
+    return Observable.from(entries).map(([entry, itemPath]) => {
+        if (itemPath === false) return Observable.of([entry, itemPath]);
+        else return obs_stat()(itemPath).map((res2) => {
+            let [err, stat] = res2;
+            //set the size to a blank string by default
+            entry.size = "";
+            if (err) {//stat error on the item
+                entry.type = "error";
+            } else if (stat.isDirectory()) {//folder or datafolder
+                entry.type = 'folder';
+            } else if (stat.isFile()) {
+                //a specified type or other
+                entry.type = <FolderEntryType>typeLookup[entry.name.split('.').pop() as string] || 'other';
+                entry.size = getHumanSize(stat.size);
+            }
+
             return [entry, itemPath];
-        } else if (err) {
-            //stat error on the item
-            entry.type = "error";
-        } else if (stat.isDirectory()) {
-            //folder or datafolder
-            entry.type = 'folder';
-        } else if (stat.isFile()) {
-            //a specified type or other
-            entry.type = <FolderEntryType>typeLookup[entry.name.split('.').pop() as string] || 'other';
-            entry.size = stat.size + "B";
-        }
-
-        return [entry, itemPath];
+        })
     }).mergeMap<any, any>((res) => {
         let [entry, itemPath] = res as [DirectoryEntry, string];
-
-        if (entry.type === 'folder')
-            return obs_stat(entry)(path.join(itemPath, 'tiddlywiki.info'));
-
-        else return Observable.of([true, null, entry]);
-    }).map((res) => {
-        let [err, files, entry] = res as [any, fs.Stats, DirectoryEntry];
-
-        if (!err) {
-            entry.type = 'datafolder';
-            entry.icon = "application_xp_terminal.png";
-        }
-
-        return ([true, entry]);
-    }).reduce<[boolean, DirectoryEntry], DirectoryEntry[]>((n, [dud, entry]) => {
+        if (entry.type === 'folder') {
+            return obs_stat(entry)(path.join(itemPath, 'tiddlywiki.info')).map(([err, stat]) => {
+                if (!err) {
+                    entry.type = 'datafolder';
+                }
+                return entry;
+            })
+        } else return Observable.of(entry);
+    }).reduce/* <[boolean, DirectoryEntry], DirectoryEntry[]> */((n, entry) => {
         n.push(entry);
         return n;
     }, []).map(entries => {
@@ -343,7 +323,7 @@ function file(obs: Observable<AccessPathResult<AccessPathTag>>) {
                     const fileRead = fs.createReadStream(fullpath);
                     const gzip = zlib.createGzip();
                     const pipeError = (err) => {
-                        error('Error saving backup file for %s: %s\r\n%s', state.url.path, err.message,
+                        debug(3, 'Error saving backup file for %s: %s\r\n%s', state.url.path, err.message,
                             "Please make sure the backup directory actually exists or else make the " +
                             "backupDirectory key falsy in your settings file (e.g. set it to a " +
                             "zero length string or false, or remove it completely)");
@@ -415,161 +395,101 @@ function file(obs: Observable<AccessPathResult<AccessPathTag>>) {
 
 interface PathResolverResult {
     //the tree string returned from the path resolver
-    item: string;
+    item: string | TreeObject;
     // client request url path
     reqpath: string[];
     // tree part of request url
-    treepath: string[];
+    treepathPortion: string[];
     // file part of request url
-    filepath: string[];
-    // absolute file system referred to by file system
+    filepathPortion: string[];
+    // item + filepath if item is a string
     fullfilepath: string;
     state: StateObject;
 }
-type ChainFunction<T, R> = (item: T) => (Observable<R> | void);
 
-/**
- * The handler is chained to the source, and if the handler returns an observable
- * the chain will continue, otherwise the chain completes.
- */
-class Chain<T> implements Subscribable<T> {
-    static isObservable<T>(obj: any): obj is Observable<T> {
-        return typeof obj === "object" && obj instanceof Observable;
-    }
-    constructor(private source: Observable<T>) { }
-    xx<R>(chain: ChainFunction<T, R>) {
-        return new Chain(this.source.map(chain).filter(obsTruthy).filter(Chain.isObservable).concatAll());
-    }
-    subscribe(
-        observerOrNext?: NextObserver<T> | ErrorObserver<T> | CompletionObserver<T> | ((value: T) => void) | undefined,
-        error?: ((error: any) => void) | undefined,
-        complete?: (() => void) | undefined
-    ): AnonymousSubscription {
-        return this.source.subscribe(observerOrNext as any, error, complete);
-    }
-}
-// function xx<T, R>(this: T, chain: ChainFunction<T, R>): { xx };
-// function xx<T, R>(this: T, chain: Observable<R>): Chain<T> {
-//     return new Chain();
-// }
 
-type StatPathResult = { stat: fs.Stats, statpath: string, infostat?: fs.Stats, index: number, itemtype: string };
 function statPath(test: PathResolverResult) {
     let endStat = false;
-    return Observable.from([test.item].concat(test.filepath)).scan((n, e) => {
+    if (typeof test.item === "object") {
+        return Observable.of(<StatPathResult>{
+            itemtype: "category",
+            endStat: false,
+        });
+    } else return Observable.from([test.item].concat(test.filepathPortion)).scan((n, e) => {
         return { path: path.join(n.path, e), index: n.index + 1 };
-    }, { path: "", index: -1 }).concatMap(statpath => {
-        if (endStat) return Observable.empty<never>();
-        else return new Promise(resolve => {
-            // What I wish I could write
-            new Chain(obs_stat(fs.stat)(statpath.path)).xx(([err, stat]) => {
-                if (err)
-                    endStat = true;
-                else if (stat.isDirectory())
+    }, { path: "", index: -1 }).chainMap(statpath => {
+        if (!endStat) return Observable.fromPromise(new Promise(resolve => {
+            // What I wish I could write (so I did)
+            obs_stat(fs.stat)(statpath.path).chainMap(([err, stat]) => {
+                if (err) endStat = true;
+                if (!err && stat.isDirectory())
                     return obs_stat(stat)(path.join(statpath.path, "tiddlywiki.info"));
-                else
-                    resolve({ stat, statpath, index: statpath.index })
-            }).xx(([err2, infostat, stat]) => {
+                else resolve({ stat, statpath, index: statpath.index })
+            }).concatAll().subscribe(([err2, infostat, stat]) => {
                 if (!err2 && (infostat.isFile() || infostat.isSymbolicLink())) {
                     endStat = true;
                     resolve({ stat, statpath, infostat, index: statpath.index })
                 } else resolve({ stat, statpath, index: statpath.index });
             });
-            // chain_observable([
-            //     obs_stat()(statpath.path),
-            //     ([err, stat]) => {
-            //         if (err) endStat = true;
-            //         else if (stat.isDirectory())
-            //             return obs_stat(stat)(path.join(statpath.path, "tiddlywiki.info"));
-            //         else resolve({ stat, statpath, index: statpath.index })
-            //     },
-            //     ([err2, infostat, stat]) => {
-            //         if (!err2 && (infostat.isFile() || infostat.isSymbolicLink())) {
-            //             endStat = true;
-            //             resolve({ stat, statpath, infostat, index: statpath.index })
-            //         } else resolve({ stat, statpath, index: statpath.index });
-            //     }
-            // ])
-
-            // What I actually have to write (in theory)
-            fs.stat(statpath.path, (err, stat) => {
-                if (err) endStat = true;
-                else if (stat.isDirectory())
-                    fs.stat(path.join(statpath.path, "tiddlywiki.info"), (err2, infostat) => {
-                        if (!err2 && (infostat.isFile() || infostat.isSymbolicLink())) {
-                            endStat = true;
-                            resolve({ stat, statpath, infostat, index: statpath.index })
-                        } else resolve({ stat, statpath, index: statpath.index });
-                    })
-                else resolve({ stat, statpath, index: statpath.index });
-            })
-        })
-    }).reduce<any, StatPathResult>((n, e) => e, {} as any).map(result => {
+        }));
+    }).concatAll().reduce((n, e) => e, {} as any).map(result => {
         //endstat is true if the full path is not found, or the tiddlywiki.info is found
         const { stat, statpath, infostat, index } = result;
         let itemtype;
 
-        if (stat.isDirectory()) itemtype = !!infostat ? "datafolder" : "folder";
+        if (!stat) itemtype = "error";
+        else if (stat.isDirectory()) itemtype = !!infostat ? "datafolder" : "folder";
         else if (stat.isFile() || stat.isSymbolicLink()) itemtype = "file"
         else itemtype = "error"
 
-        if (endStat && itemtype === "file") {
-            //do I allow this currently?
-        } else if (endStat && itemtype === "folder") {
-            //just return a 404, we didn't find a file.
-        } else if (itemtype === "datafolder") {
-            //hand off to the data folder handler
-        }
-
         result.itemtype = itemtype;
-        return result as typeof result;
+        result.endstat = endStat;
+        return result as StatPathResult;
     })
 }
 
 type TreeObject = { [K: string]: string | TreeObject };
-type TreePathResult = { item: TreeObject, end: number, more: false }
-    | { item: string, end: number, more: false }
-    | { item: string, end: number, more: true };
+type TreePathResultObject<T, U, V> = { item: T, end: U, folderPathFound: V }
+type TreePathResult =
+    TreePathResultObject<TreeObject, number, false>
+    | TreePathResultObject<string, number, false>
+    | TreePathResultObject<string, number, true>;
 export class PathResolver {
     constructor(
         public tree: TreeObject
-    ) {
+    ) { }
 
-    }
-
-    resolve(state: StateObject) {
+    resolve(state: StateObject): PathResolverResult | undefined {
         var reqpath = decodeURI(state.path.slice().filter(a => a).join('/')).split('/').filter(a => a);
-        var result = this.getTreePath(reqpath);
-        //if the reqpath is longer than end, but item is not a string, then the complete 
-        //path is not in the tree and we send a 404.
-        if (reqpath.length > result.end && !result.more)
-            return state.throw(404) as never;
-        //get the remainder of the path
-        let filepath = reqpath.slice(result.end).map(a => a.trim());
+        
         //check for invalid items (such as ..)
-        if (!filepath.every(a => a !== ".." && a !== ".")) return state.throw(404);
-        const fullfilepath = (result.more) ? path.join(result.item, ...filepath) : '';
-        return { item: result.item, reqpath, treepath: reqpath.slice(0, result.end), filepath, fullfilepath, state };
-    }
-    /**
-     * 
-     * @param {string[]} reqpath
-     * @returns a tuple of (0) the folder path, (1) the index 
-     * at which to slice to get the path below [0], and (2) true
-     * if the loop found a string before iterating through all
-     * of the request path. If the last item in reqpath resolves
-     * to a string it will return false.
-     */
-    getTreePath(reqpath: string[]): TreePathResult {
-        var item: any = this.tree;
-        var more = false;
-        for (var end = 0; end < reqpath.length; end++) {
-            if (typeof item !== 'string' && typeof item[reqpath[end]] !== 'undefined') {
-                item = item[reqpath[end]];
-            } else if (typeof item === "string") {
-                more = true; break;
-            } else break;
-        }
-        return { item, end, more } as any;
+        if (!reqpath.every(a => a !== ".." && a !== ".")) return;
+
+        var result = (function () {
+            var item: any = this.tree;
+            var folderPathFound = false;
+            for (var end = 0; end < reqpath.length; end++) {
+                if (typeof item !== 'string' && typeof item[reqpath[end]] !== 'undefined') {
+                    item = item[reqpath[end]];
+                } else if (typeof item === "string") {
+                    folderPathFound = true; break;
+                } else break;
+            }
+            return { item, end, folderPathFound } as TreePathResult;
+        })();
+        if (reqpath.length > result.end && !result.folderPathFound) return;
+
+        //get the remainder of the path
+        let filepathPortion = reqpath.slice(result.end).map(a => a.trim());
+
+        const fullfilepath = (result.folderPathFound) ? path.join(result.item, ...filepathPortion) : '';
+        return {
+            item: result.item,
+            reqpath,
+            treepathPortion: reqpath.slice(0, result.end),
+            filepathPortion,
+            fullfilepath,
+            state
+        };
     }
 }
